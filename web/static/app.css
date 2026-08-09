@@ -445,6 +445,7 @@ kbd {
 .btn-ghost:hover { background: var(--bg-hover); color: var(--text); }
 
 /* ============ Forms / modal ============ */
+.modal-overlay[hidden], .palette-overlay[hidden] { display: none; }
 .modal-overlay, .palette-overlay {
   position: fixed; inset: 0; z-index: 50;
   background: rgba(0, 0, 0, 0.4);

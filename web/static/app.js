@@ -1069,12 +1069,12 @@
       e.preventDefault();
       const payload = {
         name: $("f-name").value.trim(),
-        kind: $("f-kind").value,
         tags: csvToList($("f-tags").value),
         variables: csvToList($("f-vars").value),
         body: $("f-body").value,
       };
       if (state.v2) {
+        payload.kind = $("f-kind").value;
         payload.categoryId = $("f-cat") ? $("f-cat").value : "";
         payload.systemPromptId = payload.kind === "user" ? $("f-sys").value : "";
       }
