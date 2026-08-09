@@ -382,7 +382,7 @@
     if (f.view === "user" && !(type === "prompt" && item.kind === "user")) return false;
     if (f.categoryId !== null) {
       if (f.categoryId === "") { if (item.categoryId) return false; }
-      else if ((item.categoryId || "") !== f.categoryId) return false;
+      else if (!categorySubtree(f.categoryId).has(item.categoryId || "")) return false;
     }
     if (f.tag && !(item.tags || []).includes(f.tag)) return false;
     if (f.q) {
@@ -404,8 +404,23 @@
   /* rendering: sidebar tree                                            */
   /* ------------------------------------------------------------------ */
 
+  function categorySubtree(catId) {
+    const ids = new Set([catId]);
+    if (catId !== "") {
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const c of state.categories) {
+          if (c.parentId && ids.has(c.parentId) && !ids.has(c.id)) { ids.add(c.id); grew = true; }
+        }
+      }
+    }
+    return ids;
+  }
+
   function countInCategory(catId) {
-    const inCat = (x) => (x.categoryId || "") === catId;
+    const ids = categorySubtree(catId);
+    const inCat = (x) => ids.has(x.categoryId || "");
     return state.prompts.filter(inCat).length + state.notes.filter(inCat).length;
   }
 
