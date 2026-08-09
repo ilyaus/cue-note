@@ -1,82 +1,71 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>cue-note</title>
-    <link rel="stylesheet" href="app.css" />
-  </head>
-  <body>
-    <header class="topbar">
-      <h1>cue-note</h1>
-      <nav class="tabs">
-        <button type="button" class="tab" data-kind="prompts" aria-pressed="true">Prompts</button>
-        <button type="button" class="tab" data-kind="notes" aria-pressed="false">Notes</button>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>cue-note</title>
+  <link rel="stylesheet" href="app.css" />
+  <script>
+    (function () {
+      var t = localStorage.getItem("cue-note-theme");
+      if (!t || t === "auto") {
+        t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      }
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
+</head>
+<body>
+  <div id="app" class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="workspace-name"><span class="workspace-icon">&#128220;</span> cue-note</div>
+        <button class="icon-btn" id="theme-toggle" title="Switch theme">&#9681;</button>
+      </div>
+      <div class="sidebar-search">
+        <input type="search" id="search-input" placeholder="Search&hellip;  ( / )" autocomplete="off" />
+      </div>
+      <nav class="sidebar-scroll">
+        <div class="tree" id="tree" role="tree" aria-label="Workspace tree"></div>
+        <div class="sidebar-section" id="tag-section">
+          <div class="sidebar-section-title">Tags</div>
+          <div class="tag-filters" id="tag-filters"></div>
+        </div>
       </nav>
-      <span id="status" class="status" role="status"></span>
-    </header>
+      <div class="sidebar-footer">
+        <button class="sidebar-new-btn" id="new-prompt-btn">+ New prompt</button>
+        <button class="sidebar-new-btn" id="new-note-btn">+ New note</button>
+        <button class="sidebar-new-btn" id="new-category-btn">+ New category</button>
+      </div>
+    </aside>
 
-    <main>
-      <section class="sidebar">
-        <form id="filters" autocomplete="off">
-          <input type="search" id="q" placeholder="Search text…" />
-          <input type="text" id="tag-filter" placeholder="Filter by tags (comma separated)" />
-          <div class="row">
-            <button type="submit">Apply</button>
-            <button type="reset" id="clear-filters">Clear</button>
-          </div>
-        </form>
-        <div class="row">
-          <button type="button" id="new-record">New</button>
-          <span id="count" class="count"></span>
-        </div>
-        <ul id="list" class="list"></ul>
-        <div class="tag-cloud">
-          <h2>Tags in use</h2>
-          <ul id="tag-cloud"></ul>
-        </div>
-      </section>
-
-      <section class="editor">
-        <form id="record-form" autocomplete="off">
-          <input type="hidden" id="record-id" />
-
-          <label>
-            <span id="title-label">Name</span>
-            <input type="text" id="title" required />
-          </label>
-
-          <label>
-            <span>Tags (comma separated)</span>
-            <input type="text" id="tags" />
-          </label>
-
-          <label id="variables-field">
-            <span>Variables (comma separated placeholder names)</span>
-            <input type="text" id="variables" />
-          </label>
-
-          <label id="prompt-link-field" hidden>
-            <span>Linked prompt</span>
-            <select id="prompt-id">
-              <option value="">— none —</option>
-            </select>
-          </label>
-
-          <label>
-            <span id="body-label">Body / template text</span>
-            <textarea id="body" rows="18"></textarea>
-          </label>
-
-          <div class="row">
-            <button type="submit" id="save">Save</button>
-            <button type="button" id="delete" hidden>Delete</button>
-            <span id="meta" class="meta"></span>
-          </div>
-        </form>
-      </section>
+    <main class="main" id="main">
+      <header class="topbar">
+        <button class="icon-btn sidebar-toggle" id="sidebar-toggle" title="Toggle sidebar">&#9776;</button>
+        <nav class="breadcrumb" id="breadcrumb"></nav>
+        <div class="topbar-spacer"></div>
+        <span class="mode-badge" id="mode-badge" hidden></span>
+        <button class="icon-btn" id="palette-btn" title="Command palette (Ctrl+K)">&#8984;K</button>
+      </header>
+      <div class="canvas-wrap" id="canvas-wrap">
+        <div id="canvas" class="canvas"></div>
+      </div>
     </main>
+  </div>
 
-    <script src="app.js"></script>
-  </body>
+  <div class="palette-overlay" id="palette-overlay" hidden>
+    <div class="palette" role="dialog" aria-label="Command palette">
+      <input type="text" id="palette-input" placeholder="Type a command or search&hellip;" autocomplete="off" />
+      <ul class="palette-results" id="palette-results"></ul>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-overlay" hidden>
+    <div class="modal" id="modal" role="dialog"></div>
+  </div>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
 </html>
