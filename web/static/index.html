@@ -1,82 +1,154 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>cue-note</title>
-    <link rel="stylesheet" href="app.css" />
-  </head>
-  <body>
-    <header class="topbar">
-      <h1>cue-note</h1>
-      <nav class="tabs">
-        <button type="button" class="tab" data-kind="prompts" aria-pressed="true">Prompts</button>
-        <button type="button" class="tab" data-kind="notes" aria-pressed="false">Notes</button>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>cue-note</title>
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <div class="bg-aurora" aria-hidden="true">
+    <div class="blob blob-a"></div>
+    <div class="blob blob-b"></div>
+    <div class="blob blob-c"></div>
+  </div>
+
+  <div class="shell">
+    <aside class="sidebar glass" id="sidebar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">◈</span>
+        <h1 class="gradient-text">cue-note</h1>
+      </div>
+
+      <div class="search-wrap">
+        <input id="search" type="search" placeholder="Search…  ( / )" autocomplete="off" />
+      </div>
+
+      <nav class="tree" aria-label="Browse">
+        <div class="tree-section">
+          <div class="tree-head">
+            <span>Library</span>
+          </div>
+          <ul id="tree-root" class="tree-list"></ul>
+        </div>
+
+        <div class="tree-section" id="categories-section">
+          <div class="tree-head">
+            <span>Categories</span>
+            <button id="new-category" class="icon-btn" type="button" title="New category">＋</button>
+          </div>
+          <ul id="tree-categories" class="tree-list"></ul>
+        </div>
+
+        <div class="tree-section">
+          <div class="tree-head"><span>Tags</span></div>
+          <ul id="tag-chips" class="chips"></ul>
+        </div>
       </nav>
-      <span id="status" class="status" role="status"></span>
-    </header>
 
-    <main>
-      <section class="sidebar">
-        <form id="filters" autocomplete="off">
-          <input type="search" id="q" placeholder="Search text…" />
-          <input type="text" id="tag-filter" placeholder="Filter by tags (comma separated)" />
-          <div class="row">
-            <button type="submit">Apply</button>
-            <button type="reset" id="clear-filters">Clear</button>
+      <div class="sidebar-foot">
+        <div class="theme-row">
+          <button id="theme-toggle" class="pill-btn" type="button" title="Toggle theme">
+            <span id="theme-icon">◐</span> <span id="theme-label">Theme</span>
+          </button>
+          <div class="accent-picker" id="accent-picker" title="Accent">
+            <button class="accent-dot" data-accent="aurora" type="button" aria-label="Aurora accent"></button>
+            <button class="accent-dot" data-accent="sunset" type="button" aria-label="Sunset accent"></button>
+            <button class="accent-dot" data-accent="candy" type="button" aria-label="Candy accent"></button>
           </div>
-        </form>
-        <div class="row">
-          <button type="button" id="new-record">New</button>
-          <span id="count" class="count"></span>
         </div>
-        <ul id="list" class="list"></ul>
-        <div class="tag-cloud">
-          <h2>Tags in use</h2>
-          <ul id="tag-cloud"></ul>
+        <div class="api-mode" id="api-mode"></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar glass">
+        <div class="crumb" id="crumb">All items</div>
+        <div class="topbar-actions">
+          <span class="count-badge" id="count-badge"></span>
+          <button id="new-prompt" class="pill-btn primary" type="button">＋ Prompt</button>
+          <button id="new-note" class="pill-btn" type="button">＋ Note</button>
         </div>
-      </section>
+      </header>
 
-      <section class="editor">
-        <form id="record-form" autocomplete="off">
-          <input type="hidden" id="record-id" />
-
-          <label>
-            <span id="title-label">Name</span>
-            <input type="text" id="title" required />
-          </label>
-
-          <label>
-            <span>Tags (comma separated)</span>
-            <input type="text" id="tags" />
-          </label>
-
-          <label id="variables-field">
-            <span>Variables (comma separated placeholder names)</span>
-            <input type="text" id="variables" />
-          </label>
-
-          <label id="prompt-link-field" hidden>
-            <span>Linked prompt</span>
-            <select id="prompt-id">
-              <option value="">— none —</option>
-            </select>
-          </label>
-
-          <label>
-            <span id="body-label">Body / template text</span>
-            <textarea id="body" rows="18"></textarea>
-          </label>
-
-          <div class="row">
-            <button type="submit" id="save">Save</button>
-            <button type="button" id="delete" hidden>Delete</button>
-            <span id="meta" class="meta"></span>
-          </div>
-        </form>
-      </section>
+      <section id="grid" class="grid" aria-live="polite"></section>
+      <div id="empty-state" class="empty-state glass" hidden>
+        <div class="empty-art" aria-hidden="true">✧</div>
+        <h2>Nothing here yet</h2>
+        <p>Create a prompt or a note to get started.</p>
+      </div>
+      <div id="loading" class="loading" hidden>
+        <div class="spinner" aria-hidden="true"></div> Loading…
+      </div>
     </main>
+  </div>
 
-    <script src="app.js"></script>
-  </body>
+  <div id="overlay" class="overlay" hidden></div>
+
+  <aside id="detail" class="detail glass" hidden aria-label="Detail">
+    <div class="detail-head">
+      <div class="detail-kind" id="detail-kind"></div>
+      <div class="detail-head-actions">
+        <button id="detail-edit" class="pill-btn" type="button">Edit</button>
+        <button id="detail-delete" class="pill-btn danger" type="button">Delete</button>
+        <button id="detail-close" class="icon-btn" type="button" aria-label="Close">✕</button>
+      </div>
+    </div>
+    <div class="detail-body" id="detail-body"></div>
+  </aside>
+
+  <aside id="editor" class="detail glass" hidden aria-label="Editor">
+    <div class="detail-head">
+      <div class="detail-kind" id="editor-title"></div>
+      <div class="detail-head-actions">
+        <button id="editor-close" class="icon-btn" type="button" aria-label="Close">✕</button>
+      </div>
+    </div>
+    <form id="editor-form" class="editor-form">
+      <input type="hidden" id="f-id" />
+      <input type="hidden" id="f-type" />
+      <label class="field"><span>Name</span><input id="f-name" required /></label>
+      <label class="field" id="f-kind-field"><span>Kind</span>
+        <select id="f-kind">
+          <option value="user">user</option>
+          <option value="system">system</option>
+        </select>
+      </label>
+      <label class="field" id="f-system-field"><span>System prompt</span>
+        <select id="f-system"></select>
+      </label>
+      <label class="field" id="f-category-field"><span>Category</span>
+        <select id="f-category"></select>
+      </label>
+      <label class="field" id="f-attach-field"><span>Attached to prompt</span>
+        <select id="f-attach"></select>
+      </label>
+      <label class="field"><span>Tags <small>(comma separated)</small></span><input id="f-tags" /></label>
+      <label class="field" id="f-vars-field"><span>Variables <small>(comma separated)</small></span><input id="f-vars" /></label>
+      <div class="field body-field">
+        <div class="body-head">
+          <span>Body <small>(Markdown)</small></span>
+          <button type="button" id="preview-toggle" class="pill-btn small">Preview</button>
+        </div>
+        <textarea id="f-body" rows="12" spellcheck="false"></textarea>
+        <div id="f-preview" class="md-preview" hidden></div>
+      </div>
+      <div class="editor-actions">
+        <button type="submit" class="pill-btn primary">Save</button>
+        <button type="button" id="editor-cancel" class="pill-btn">Cancel</button>
+      </div>
+    </form>
+  </aside>
+
+  <div id="palette" class="palette-wrap" hidden>
+    <div class="palette glass">
+      <input id="palette-input" placeholder="Type a command or search… " autocomplete="off" />
+      <ul id="palette-list"></ul>
+    </div>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="assertive"></div>
+
+  <script src="/app.js"></script>
+</body>
 </html>
