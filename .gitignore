@@ -1,0 +1,30 @@
+# Build artifacts
+bin/
+
+# Local data — a personal prompt/notes library is never committed
+data/
+*.cue-note.json
+.cue-note-*.tmp
+
+# Test output
+coverage.out
+coverage.html
+*.test
+*.out
+/tmp/
+
+# Runtime secrets — NEVER commit
+config.json
+*.secrets.json
+.env
+.local/
+
+# OS/editor temp files
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+
+# IDE
+.vscode/
+.idea/
