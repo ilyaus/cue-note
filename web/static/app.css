@@ -1,0 +1,224 @@
+:root {
+  --bg: #10141a;
+  --panel: #171d26;
+  --panel-2: #1f2734;
+  --line: #2c3644;
+  --text: #e6ecf3;
+  --muted: #93a1b3;
+  --accent: #62b0ff;
+  --danger: #ff7b72;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Element-type display rules below would otherwise beat the user-agent
+   [hidden] rule, leaving hidden fields visible. */
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.tabs {
+  display: flex;
+  gap: 6px;
+}
+
+button {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+.tab[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0b1017;
+  font-weight: 600;
+}
+
+#delete {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.status {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 1em;
+}
+
+.status.error {
+  color: var(--danger);
+}
+
+main {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 1px;
+  background: var(--line);
+  height: calc(100vh - 49px);
+}
+
+.sidebar,
+.editor {
+  background: var(--bg);
+  padding: 12px;
+  overflow-y: auto;
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 9px;
+}
+
+textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  resize: vertical;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: 1px solid var(--accent);
+  border-color: var(--accent);
+}
+
+#filters {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.count,
+.meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.list {
+  list-style: none;
+  margin: 10px 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.list li {
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.list li:hover {
+  border-color: var(--accent);
+}
+
+.list li[aria-selected="true"] {
+  border-color: var(--accent);
+  background: var(--panel-2);
+}
+
+.list .name {
+  font-weight: 600;
+}
+
+.list .sub {
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.list .empty {
+  color: var(--muted);
+  cursor: default;
+  text-align: center;
+}
+
+.tag-cloud h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.tag-cloud ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-cloud button {
+  padding: 3px 8px;
+  font-size: 12px;
+  border-radius: 999px;
+}
+
+#record-form {
+  display: grid;
+  gap: 10px;
+  max-width: 900px;
+}
+
+label {
+  display: grid;
+  gap: 4px;
+}
+
+label > span {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
