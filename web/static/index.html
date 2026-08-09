@@ -1,82 +1,108 @@
 <!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>cue-note</title>
-    <link rel="stylesheet" href="app.css" />
-  </head>
-  <body>
-    <header class="topbar">
-      <h1>cue-note</h1>
-      <nav class="tabs">
-        <button type="button" class="tab" data-kind="prompts" aria-pressed="true">Prompts</button>
-        <button type="button" class="tab" data-kind="notes" aria-pressed="false">Notes</button>
-      </nav>
-      <span id="status" class="status" role="status"></span>
-    </header>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>cue-note</title>
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <div id="app" class="app">
+    <!-- Activity bar (icon rail) -->
+    <nav class="activity-bar" aria-label="Primary">
+      <button class="ab-btn active" id="ab-explorer" title="Explorer" aria-label="Explorer">
+        <svg viewBox="0 0 24 24"><path d="M3 5a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5z"/></svg>
+      </button>
+      <button class="ab-btn" id="ab-search" title="Search (/)" aria-label="Search">
+        <svg viewBox="0 0 24 24"><path d="M10 4a6 6 0 1 0 3.9 10.6l4.7 4.7 1.4-1.4-4.7-4.7A6 6 0 0 0 10 4zm0 2a4 4 0 1 1 0 8 4 4 0 0 1 0-8z"/></svg>
+      </button>
+      <button class="ab-btn" id="ab-new-prompt" title="New prompt" aria-label="New prompt">
+        <svg viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5z"/></svg>
+      </button>
+      <button class="ab-btn" id="ab-palette" title="Command palette (Ctrl+K)" aria-label="Command palette">
+        <svg viewBox="0 0 24 24"><path d="M4 6h16v2H4V6zm0 5h10v2H4v-2zm0 5h16v2H4v-2z"/></svg>
+      </button>
+      <div class="ab-spacer"></div>
+      <button class="ab-btn" id="ab-theme" title="Toggle theme" aria-label="Toggle theme">
+        <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.5 0-.9-.1-1.4A7 7 0 0 1 12.4 3h-.4z"/></svg>
+      </button>
+    </nav>
 
-    <main>
-      <section class="sidebar">
-        <form id="filters" autocomplete="off">
-          <input type="search" id="q" placeholder="Search text…" />
-          <input type="text" id="tag-filter" placeholder="Filter by tags (comma separated)" />
-          <div class="row">
-            <button type="submit">Apply</button>
-            <button type="reset" id="clear-filters">Clear</button>
-          </div>
-        </form>
-        <div class="row">
-          <button type="button" id="new-record">New</button>
-          <span id="count" class="count"></span>
+    <!-- Sidebar / explorer -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-title">EXPLORER</span>
+        <div class="sidebar-actions">
+          <button class="icon-btn" id="btn-new-category" title="New category">▣+</button>
+          <button class="icon-btn" id="btn-new-prompt" title="New prompt">P+</button>
+          <button class="icon-btn" id="btn-new-note" title="New note">N+</button>
+          <button class="icon-btn" id="btn-refresh" title="Refresh">↻</button>
         </div>
-        <ul id="list" class="list"></ul>
-        <div class="tag-cloud">
-          <h2>Tags in use</h2>
-          <ul id="tag-cloud"></ul>
-        </div>
-      </section>
+      </div>
+      <div class="sidebar-search">
+        <input type="search" id="search" placeholder="Search (press /)" autocomplete="off" />
+      </div>
+      <div class="sidebar-filters" id="kind-filters">
+        <button class="chip active" data-kind="">all</button>
+        <button class="chip" data-kind="system">system</button>
+        <button class="chip" data-kind="user">user</button>
+        <button class="chip" data-kind="notes">notes</button>
+      </div>
+      <div class="tag-strip" id="tag-strip" aria-label="Tag filters"></div>
+      <div class="tree" id="tree" role="tree" aria-label="Prompts and notes"></div>
+    </aside>
 
-      <section class="editor">
-        <form id="record-form" autocomplete="off">
-          <input type="hidden" id="record-id" />
-
-          <label>
-            <span id="title-label">Name</span>
-            <input type="text" id="title" required />
-          </label>
-
-          <label>
-            <span>Tags (comma separated)</span>
-            <input type="text" id="tags" />
-          </label>
-
-          <label id="variables-field">
-            <span>Variables (comma separated placeholder names)</span>
-            <input type="text" id="variables" />
-          </label>
-
-          <label id="prompt-link-field" hidden>
-            <span>Linked prompt</span>
-            <select id="prompt-id">
-              <option value="">— none —</option>
-            </select>
-          </label>
-
-          <label>
-            <span id="body-label">Body / template text</span>
-            <textarea id="body" rows="18"></textarea>
-          </label>
-
-          <div class="row">
-            <button type="submit" id="save">Save</button>
-            <button type="button" id="delete" hidden>Delete</button>
-            <span id="meta" class="meta"></span>
+    <!-- Main area -->
+    <main class="main">
+      <div class="tab-bar" id="tab-bar" role="tablist"></div>
+      <div class="editor-area" id="editor-area">
+        <div class="welcome" id="welcome">
+          <div class="welcome-inner">
+            <h1>cue-note</h1>
+            <p class="muted">local-first prompt &amp; notes manager</p>
+            <ul class="welcome-keys">
+              <li><kbd>/</kbd> search</li>
+              <li><kbd>Ctrl</kbd>+<kbd>K</kbd> command palette</li>
+              <li><kbd>Ctrl</kbd>+<kbd>S</kbd> save active tab</li>
+            </ul>
+            <div class="welcome-actions">
+              <button class="btn" id="welcome-new-prompt">New prompt</button>
+              <button class="btn secondary" id="welcome-new-note">New note</button>
+            </div>
           </div>
-        </form>
-      </section>
+        </div>
+      </div>
+      <footer class="status-bar" id="status-bar">
+        <span class="sb-item" id="sb-api">API: …</span>
+        <span class="sb-item" id="sb-counts"></span>
+        <span class="sb-flex"></span>
+        <span class="sb-item" id="sb-msg"></span>
+        <label class="sb-item sb-theme">
+          theme
+          <select id="theme-picker" aria-label="Theme">
+            <option value="dark">Dark+</option>
+            <option value="light">Quiet Light</option>
+          </select>
+        </label>
+      </footer>
     </main>
+  </div>
 
-    <script src="app.js"></script>
-  </body>
+  <!-- Command palette -->
+  <div class="palette-overlay hidden" id="palette-overlay">
+    <div class="palette" role="dialog" aria-label="Command palette">
+      <input type="text" id="palette-input" placeholder="Type a command or search items…" autocomplete="off" />
+      <ul class="palette-list" id="palette-list"></ul>
+    </div>
+  </div>
+
+  <!-- Modal (category editor, confirmations) -->
+  <div class="modal-overlay hidden" id="modal-overlay">
+    <div class="modal" role="dialog" id="modal"></div>
+  </div>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
 </html>
