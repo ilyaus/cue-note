@@ -1174,12 +1174,12 @@
     const d = tab.draft;
     const payload = {
       name: d.name.trim(),
-      kind: d.kind,
       tags: csv(d.tags),
       variables: csv(d.variables),
       body: d.body,
     };
     if (v2()) {
+      payload.kind = d.kind;
       payload.categoryId = d.categoryId || "";
       payload.systemPromptId = d.kind === "user" ? d.systemPromptId || "" : "";
     }
