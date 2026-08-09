@@ -114,6 +114,7 @@ func New(cfg Config) (*Server, error) {
 }
 
 func (s *Server) routes() {
+	s.mux.HandleFunc("/", s.handleUnknownRoute)
 	s.mux.HandleFunc("/healthz", s.handleHealth)
 	s.mux.Handle("/v1/prompts", s.authenticated(http.HandlerFunc(s.handlePromptCollection)))
 	s.mux.Handle("/v1/prompts/", s.authenticated(http.HandlerFunc(s.handlePromptItem)))
@@ -141,6 +142,12 @@ func (s *Server) authenticated(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// handleUnknownRoute keeps unmatched paths inside the error envelope instead of
+// falling through to the ServeMux plain-text 404.
+func (s *Server) handleUnknownRoute(w http.ResponseWriter, _ *http.Request) {
+	s.writeError(w, http.StatusNotFound, CodeNotFound, "unknown route", "")
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

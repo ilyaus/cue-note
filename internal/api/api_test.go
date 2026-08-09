@@ -316,7 +316,7 @@ func TestMethodNotAllowed(t *testing.T) {
 
 func TestUnknownItemRoutes(t *testing.T) {
 	srv := newTestServer(t)
-	for _, path := range []string{"/v1/prompts/", "/v1/prompts/a/b", "/v1/notes/", "/v1/notes/a/b"} {
+	for _, path := range []string{"/v1/prompts/", "/v1/prompts/a/b", "/v1/notes/", "/v1/notes/a/b", "/v1/bogus", "/", "/nope"} {
 		rec := do(t, srv, http.MethodGet, path, "")
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("%s: status = %d", path, rec.Code)
