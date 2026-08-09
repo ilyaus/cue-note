@@ -328,6 +328,189 @@ func TestUnknownItemRoutes(t *testing.T) {
 	}
 }
 
+func createCategory(t *testing.T, srv *Server, body string) model.Category {
+	t.Helper()
+	rec := do(t, srv, http.MethodPost, "/v1/categories", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create category status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	return decode[model.Category](t, rec)
+}
+
+func TestCategoryCRUDOverHTTP(t *testing.T) {
+	srv := newTestServer(t)
+	root := createCategory(t, srv, `{"name":"Root"}`)
+	child := createCategory(t, srv, `{"name":"Child","parentId":"`+root.ID+`"}`)
+
+	got := decode[model.Category](t, do(t, srv, http.MethodGet, "/v1/categories/"+child.ID, ""))
+	if got.ParentID != root.ID {
+		t.Fatalf("get returned %+v", got)
+	}
+
+	listed := decode[CategoryListResponse](t, do(t, srv, http.MethodGet, "/v1/categories", ""))
+	if listed.Total != 2 {
+		t.Fatalf("unexpected listing: %+v", listed)
+	}
+
+	upd := do(t, srv, http.MethodPut, "/v1/categories/"+child.ID, `{"name":"Renamed","parentId":""}`)
+	if upd.Code != http.StatusOK {
+		t.Fatalf("update status = %d body = %s", upd.Code, upd.Body.String())
+	}
+	if renamed := decode[model.Category](t, upd); renamed.Name != "Renamed" || renamed.ParentID != "" {
+		t.Fatalf("unexpected update: %+v", renamed)
+	}
+
+	if rec := do(t, srv, http.MethodPost, "/v1/categories", `{"name":""}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("empty name status = %d", rec.Code)
+	}
+	cycle := do(t, srv, http.MethodPut, "/v1/categories/"+root.ID, `{"name":"Root","parentId":"`+root.ID+`"}`)
+	if cycle.Code != http.StatusBadRequest {
+		t.Fatalf("self parent status = %d", cycle.Code)
+	}
+	if env := decode[ErrorResponse](t, cycle).Error; env.Code != CodeValidationFailed || env.Field != "parentId" {
+		t.Fatalf("unexpected envelope: %+v", env)
+	}
+
+	if rec := do(t, srv, http.MethodDelete, "/v1/categories/"+child.ID, ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d", rec.Code)
+	}
+	if rec := do(t, srv, http.MethodGet, "/v1/categories/"+child.ID, ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("get after delete status = %d", rec.Code)
+	}
+}
+
+func TestCategoryDeleteForceOverHTTP(t *testing.T) {
+	srv := newTestServer(t)
+	root := createCategory(t, srv, `{"name":"Root"}`)
+	createCategory(t, srv, `{"name":"Child","parentId":"`+root.ID+`"}`)
+
+	blocked := do(t, srv, http.MethodDelete, "/v1/categories/"+root.ID, "")
+	if blocked.Code != http.StatusBadRequest {
+		t.Fatalf("non-force delete status = %d", blocked.Code)
+	}
+	if got := decode[ErrorResponse](t, blocked).Error.Code; got != CodeValidationFailed {
+		t.Fatalf("code = %q", got)
+	}
+	if rec := do(t, srv, http.MethodDelete, "/v1/categories/"+root.ID+"?force=notabool", ""); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad force status = %d", rec.Code)
+	}
+	if rec := do(t, srv, http.MethodDelete, "/v1/categories/"+root.ID+"?force=true", ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("force delete status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPromptKindOverHTTP(t *testing.T) {
+	srv := newTestServer(t)
+	system := createPrompt(t, srv, `{"name":"sys","body":"b","kind":"system"}`)
+	if system.Kind != "system" {
+		t.Fatalf("kind = %q", system.Kind)
+	}
+	defaulted := createPrompt(t, srv, `{"name":"plain","body":"b"}`)
+	if defaulted.Kind != "user" {
+		t.Fatalf("default kind = %q", defaulted.Kind)
+	}
+
+	bad := do(t, srv, http.MethodPost, "/v1/prompts", `{"name":"x","body":"b","kind":"assistant"}`)
+	if bad.Code != http.StatusBadRequest {
+		t.Fatalf("bad kind status = %d", bad.Code)
+	}
+	if env := decode[ErrorResponse](t, bad).Error; env.Code != CodeValidationFailed || env.Field != "kind" {
+		t.Fatalf("unexpected envelope: %+v", env)
+	}
+
+	dangling := do(t, srv, http.MethodPost, "/v1/prompts", `{"name":"x","body":"b","systemPromptId":"missing"}`)
+	if dangling.Code != http.StatusBadRequest {
+		t.Fatalf("dangling reference status = %d", dangling.Code)
+	}
+	if env := decode[ErrorResponse](t, dangling).Error; env.Field != "systemPromptId" {
+		t.Fatalf("unexpected envelope: %+v", env)
+	}
+
+	user := createPrompt(t, srv, `{"name":"u","body":"b","systemPromptId":"`+system.ID+`"}`)
+	if user.SystemPromptID != system.ID {
+		t.Fatalf("reference not stored: %+v", user)
+	}
+
+	blocked := do(t, srv, http.MethodDelete, "/v1/prompts/"+system.ID, "")
+	if blocked.Code != http.StatusBadRequest {
+		t.Fatalf("delete referenced system prompt status = %d", blocked.Code)
+	}
+	if rec := do(t, srv, http.MethodDelete, "/v1/prompts/"+system.ID+"?force=true", ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("force delete status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	after := decode[model.Prompt](t, do(t, srv, http.MethodGet, "/v1/prompts/"+user.ID, ""))
+	if after.SystemPromptID != "" {
+		t.Errorf("systemPromptId not cleared: %q", after.SystemPromptID)
+	}
+}
+
+func TestNewListFiltersOverHTTP(t *testing.T) {
+	srv := newTestServer(t)
+	cat := createCategory(t, srv, `{"name":"Folder"}`)
+	system := createPrompt(t, srv, `{"name":"sys","body":"b","kind":"system","categoryId":"`+cat.ID+`"}`)
+	createPrompt(t, srv, `{"name":"user","body":"b"}`)
+
+	byKind := decode[PromptListResponse](t, do(t, srv, http.MethodGet, "/v1/prompts?kind=system", ""))
+	if byKind.Total != 1 || byKind.Items[0].ID != system.ID {
+		t.Fatalf("kind filter broken: %+v", byKind)
+	}
+	byCategory := decode[PromptListResponse](t, do(t, srv, http.MethodGet, "/v1/prompts?category="+cat.ID, ""))
+	if byCategory.Total != 1 || byCategory.Items[0].ID != system.ID {
+		t.Fatalf("category filter broken: %+v", byCategory)
+	}
+	if rec := do(t, srv, http.MethodGet, "/v1/prompts?kind=assistant", ""); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad kind filter status = %d", rec.Code)
+	}
+
+	attached := do(t, srv, http.MethodPost, "/v1/notes", `{"title":"tip","categoryId":"`+cat.ID+`","promptId":"`+system.ID+`"}`)
+	if attached.Code != http.StatusCreated {
+		t.Fatalf("create note status = %d body = %s", attached.Code, attached.Body.String())
+	}
+	note := decode[model.Note](t, attached)
+	if rec := do(t, srv, http.MethodPost, "/v1/notes", `{"title":"loose"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("create note status = %d", rec.Code)
+	}
+
+	noteByCategory := decode[NoteListResponse](t, do(t, srv, http.MethodGet, "/v1/notes?category="+cat.ID, ""))
+	if noteByCategory.Total != 1 || noteByCategory.Items[0].ID != note.ID {
+		t.Fatalf("note category filter broken: %+v", noteByCategory)
+	}
+	noteByPrompt := decode[NoteListResponse](t, do(t, srv, http.MethodGet, "/v1/notes?prompt="+system.ID, ""))
+	if noteByPrompt.Total != 1 || noteByPrompt.Items[0].ID != note.ID {
+		t.Fatalf("note prompt filter broken: %+v", noteByPrompt)
+	}
+}
+
+func TestPromptNotesEndpoint(t *testing.T) {
+	srv := newTestServer(t)
+	prompt := createPrompt(t, srv, `{"name":"p","body":"b"}`)
+	if rec := do(t, srv, http.MethodPost, "/v1/notes", `{"title":"attached","promptId":"`+prompt.ID+`"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("create note status = %d", rec.Code)
+	}
+	if rec := do(t, srv, http.MethodPost, "/v1/notes", `{"title":"loose"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("create note status = %d", rec.Code)
+	}
+
+	rec := do(t, srv, http.MethodGet, "/v1/prompts/"+prompt.ID+"/notes", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	page := decode[NoteListResponse](t, rec)
+	if page.Total != 1 || page.Items[0].Title != "attached" {
+		t.Fatalf("unexpected listing: %+v", page)
+	}
+
+	if rec := do(t, srv, http.MethodGet, "/v1/prompts/missing/notes", ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown prompt status = %d", rec.Code)
+	}
+	if rec := do(t, srv, http.MethodPost, "/v1/prompts/"+prompt.ID+"/notes", ""); rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST status = %d", rec.Code)
+	}
+	if rec := do(t, srv, http.MethodGet, "/v1/prompts/"+prompt.ID+"/bogus", ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown sub-resource status = %d", rec.Code)
+	}
+}
+
 func TestDisableAuthServesWithoutKey(t *testing.T) {
 	repo, err := store.OpenJSONFile(filepath.Join(t.TempDir(), "cue-note.json"))
 	if err != nil {

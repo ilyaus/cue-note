@@ -86,6 +86,14 @@ type NoteListResponse struct {
 	Offset int          `json:"offset"`
 }
 
+// CategoryListResponse is the category listing payload.
+type CategoryListResponse struct {
+	Items  []model.Category `json:"items"`
+	Total  int              `json:"total"`
+	Limit  int              `json:"limit"`
+	Offset int              `json:"offset"`
+}
+
 // New builds a Server. It fails when the configuration cannot serve requests
 // safely — notably an unset API key without an explicit opt-out.
 func New(cfg Config) (*Server, error) {
@@ -120,6 +128,8 @@ func (s *Server) routes() {
 	s.mux.Handle("/v1/prompts/", s.authenticated(http.HandlerFunc(s.handlePromptItem)))
 	s.mux.Handle("/v1/notes", s.authenticated(http.HandlerFunc(s.handleNoteCollection)))
 	s.mux.Handle("/v1/notes/", s.authenticated(http.HandlerFunc(s.handleNoteItem)))
+	s.mux.Handle("/v1/categories", s.authenticated(http.HandlerFunc(s.handleCategoryCollection)))
+	s.mux.Handle("/v1/categories/", s.authenticated(http.HandlerFunc(s.handleCategoryItem)))
 	s.mux.Handle("/v1/tags", s.authenticated(http.HandlerFunc(s.handleTags)))
 }
 
@@ -208,6 +218,10 @@ func (s *Server) handlePromptCollection(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handlePromptItem(w http.ResponseWriter, r *http.Request) {
+	if id, ok := pathSubResource(r.URL.Path, "/v1/prompts/", "notes"); ok {
+		s.handlePromptNotes(w, r, id)
+		return
+	}
 	id, ok := pathID(r.URL.Path, "/v1/prompts/")
 	if !ok {
 		s.writeError(w, http.StatusNotFound, CodeNotFound, "unknown route", "")
@@ -234,7 +248,12 @@ func (s *Server) handlePromptItem(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeJSON(w, http.StatusOK, prompt)
 	case http.MethodDelete:
-		if err := s.repo.DeletePrompt(r.Context(), id); err != nil {
+		force, err := forceParam(r)
+		if err != nil {
+			s.writeValidation(w, err)
+			return
+		}
+		if err := s.repo.DeletePrompt(r.Context(), id, force); err != nil {
 			s.writeStoreError(w, err)
 			return
 		}
@@ -242,6 +261,36 @@ func (s *Server) handlePromptItem(w http.ResponseWriter, r *http.Request) {
 	default:
 		s.methodNotAllowed(w, http.MethodGet, http.MethodPut, http.MethodDelete)
 	}
+}
+
+// handlePromptNotes serves GET /v1/prompts/{id}/notes: the notes attached to a
+// prompt, shaped exactly like a filtered note listing.
+func (s *Server) handlePromptNotes(w http.ResponseWriter, r *http.Request, promptID string) {
+	if r.Method != http.MethodGet {
+		s.methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	if _, err := s.repo.GetPrompt(r.Context(), promptID); err != nil {
+		s.writeStoreError(w, err)
+		return
+	}
+	opts, err := listOptions(r)
+	if err != nil {
+		s.writeValidation(w, err)
+		return
+	}
+	opts.PromptID = promptID
+	page, err := s.repo.ListNotes(r.Context(), opts)
+	if err != nil {
+		s.writeStoreError(w, err)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, NoteListResponse{
+		Items:  page.Items,
+		Total:  page.Total,
+		Limit:  opts.Limit,
+		Offset: opts.Offset,
+	})
 }
 
 func (s *Server) handleNoteCollection(w http.ResponseWriter, r *http.Request) {
@@ -317,6 +366,84 @@ func (s *Server) handleNoteItem(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleCategoryCollection(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		opts, err := listOptions(r)
+		if err != nil {
+			s.writeValidation(w, err)
+			return
+		}
+		page, err := s.repo.ListCategories(r.Context(), opts)
+		if err != nil {
+			s.writeStoreError(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, CategoryListResponse{
+			Items:  page.Items,
+			Total:  page.Total,
+			Limit:  opts.Limit,
+			Offset: opts.Offset,
+		})
+	case http.MethodPost:
+		var in model.CategoryInput
+		if err := s.decode(w, r, &in); err != nil {
+			s.writeDecodeError(w, err)
+			return
+		}
+		category, err := s.repo.CreateCategory(r.Context(), in)
+		if err != nil {
+			s.writeStoreError(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusCreated, category)
+	default:
+		s.methodNotAllowed(w, http.MethodGet, http.MethodPost)
+	}
+}
+
+func (s *Server) handleCategoryItem(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r.URL.Path, "/v1/categories/")
+	if !ok {
+		s.writeError(w, http.StatusNotFound, CodeNotFound, "unknown route", "")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		category, err := s.repo.GetCategory(r.Context(), id)
+		if err != nil {
+			s.writeStoreError(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, category)
+	case http.MethodPut:
+		var in model.CategoryInput
+		if err := s.decode(w, r, &in); err != nil {
+			s.writeDecodeError(w, err)
+			return
+		}
+		category, err := s.repo.UpdateCategory(r.Context(), id, in)
+		if err != nil {
+			s.writeStoreError(w, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, category)
+	case http.MethodDelete:
+		force, err := forceParam(r)
+		if err != nil {
+			s.writeValidation(w, err)
+			return
+		}
+		if err := s.repo.DeleteCategory(r.Context(), id, force); err != nil {
+			s.writeStoreError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		s.methodNotAllowed(w, http.MethodGet, http.MethodPut, http.MethodDelete)
+	}
+}
+
 // pathID extracts a single trailing path segment, rejecting empty and nested ids.
 func pathID(path, prefix string) (string, bool) {
 	rest := strings.TrimPrefix(path, prefix)
@@ -326,13 +453,45 @@ func pathID(path, prefix string) (string, bool) {
 	return rest, true
 }
 
-// listOptions parses tag, q, limit, and offset query parameters.
+// pathSubResource extracts the id from prefix + "{id}/" + sub paths.
+func pathSubResource(path, prefix, sub string) (string, bool) {
+	rest := strings.TrimPrefix(path, prefix)
+	id, tail, found := strings.Cut(rest, "/")
+	if !found || id == "" || tail != sub {
+		return "", false
+	}
+	return id, true
+}
+
+// forceParam parses the optional ?force=true query parameter on DELETE.
+func forceParam(r *http.Request) (bool, error) {
+	raw := r.URL.Query().Get("force")
+	if raw == "" {
+		return false, nil
+	}
+	force, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, &model.ValidationError{Field: "force", Message: "must be a boolean"}
+	}
+	return force, nil
+}
+
+// listOptions parses tag, q, category, kind, prompt, limit, and offset query
+// parameters. Kind and prompt only take effect on the listings that use them.
 func listOptions(r *http.Request) (store.ListOptions, error) {
 	query := r.URL.Query()
 	opts := store.ListOptions{
-		Tags:  model.NormalizeTags(query["tag"]),
-		Query: query.Get("q"),
-		Limit: DefaultListLimit,
+		Tags:       model.NormalizeTags(query["tag"]),
+		Query:      query.Get("q"),
+		CategoryID: strings.TrimSpace(query.Get("category")),
+		PromptID:   strings.TrimSpace(query.Get("prompt")),
+		Limit:      DefaultListLimit,
+	}
+	if raw := strings.ToLower(strings.TrimSpace(query.Get("kind"))); raw != "" {
+		if raw != model.KindSystem && raw != model.KindUser {
+			return store.ListOptions{}, &model.ValidationError{Field: "kind", Message: `must be "system" or "user"`}
+		}
+		opts.Kind = raw
 	}
 	if raw := query.Get("limit"); raw != "" {
 		limit, err := strconv.Atoi(raw)
