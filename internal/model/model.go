@@ -11,43 +11,72 @@ import (
 	"time"
 )
 
+// Prompt kinds distinguish system prompts from user prompts.
+const (
+	KindSystem = "system"
+	KindUser   = "user"
+)
+
 // Prompt is a reusable, versioned block of template text.
 type Prompt struct {
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	Kind           string    `json:"kind"`
+	CategoryID     string    `json:"categoryId,omitempty"`
+	SystemPromptID string    `json:"systemPromptId,omitempty"`
+	Tags           []string  `json:"tags"`
+	Body           string    `json:"body"`
+	Variables      []string  `json:"variables"`
+	Version        int       `json:"version"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+// Category is a hierarchical folder that organizes prompts and notes.
+type Category struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
-	Tags      []string  `json:"tags"`
-	Body      string    `json:"body"`
-	Variables []string  `json:"variables"`
-	Version   int       `json:"version"`
+	ParentID  string    `json:"parentId,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // Note is a free-form Markdown document, optionally linked to a Prompt.
 type Note struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
-	Tags      []string  `json:"tags"`
-	Body      string    `json:"body"`
-	PromptID  string    `json:"promptId,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID         string    `json:"id"`
+	Title      string    `json:"title"`
+	CategoryID string    `json:"categoryId,omitempty"`
+	Tags       []string  `json:"tags"`
+	Body       string    `json:"body"`
+	PromptID   string    `json:"promptId,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
 // PromptInput carries the client-owned fields of a Prompt.
 type PromptInput struct {
-	Name      string   `json:"name"`
-	Tags      []string `json:"tags"`
-	Body      string   `json:"body"`
-	Variables []string `json:"variables"`
+	Name           string   `json:"name"`
+	Kind           string   `json:"kind"`
+	CategoryID     string   `json:"categoryId"`
+	SystemPromptID string   `json:"systemPromptId"`
+	Tags           []string `json:"tags"`
+	Body           string   `json:"body"`
+	Variables      []string `json:"variables"`
 }
 
 // NoteInput carries the client-owned fields of a Note.
 type NoteInput struct {
-	Title    string   `json:"title"`
-	Tags     []string `json:"tags"`
-	Body     string   `json:"body"`
-	PromptID string   `json:"promptId"`
+	Title      string   `json:"title"`
+	CategoryID string   `json:"categoryId"`
+	Tags       []string `json:"tags"`
+	Body       string   `json:"body"`
+	PromptID   string   `json:"promptId"`
+}
+
+// CategoryInput carries the client-owned fields of a Category.
+type CategoryInput struct {
+	Name     string `json:"name"`
+	ParentID string `json:"parentId"`
 }
 
 // ValidationError reports a client-supplied field that violates a domain rule.
@@ -75,6 +104,15 @@ func (in PromptInput) Validate() error {
 	if strings.TrimSpace(in.Body) == "" {
 		return newValidationError("body", "must not be empty")
 	}
+	switch in.Kind {
+	case KindSystem:
+		if in.SystemPromptID != "" {
+			return newValidationError("systemPromptId", "must be empty for a system prompt")
+		}
+	case KindUser, "":
+	default:
+		return newValidationError("kind", `must be "system" or "user"`)
+	}
 	return nil
 }
 
@@ -86,9 +124,23 @@ func (in NoteInput) Validate() error {
 	return nil
 }
 
+// Validate reports whether the category input satisfies the domain rules.
+func (in CategoryInput) Validate() error {
+	if strings.TrimSpace(in.Name) == "" {
+		return newValidationError("name", "must not be empty")
+	}
+	return nil
+}
+
 // Normalized returns the prompt input with tags and variables cleaned up.
 func (in PromptInput) Normalized() PromptInput {
 	in.Name = strings.TrimSpace(in.Name)
+	in.Kind = strings.ToLower(strings.TrimSpace(in.Kind))
+	if in.Kind == "" {
+		in.Kind = KindUser
+	}
+	in.CategoryID = strings.TrimSpace(in.CategoryID)
+	in.SystemPromptID = strings.TrimSpace(in.SystemPromptID)
 	in.Tags = NormalizeTags(in.Tags)
 	in.Variables = normalizeVariables(in.Variables)
 	return in
@@ -97,8 +149,16 @@ func (in PromptInput) Normalized() PromptInput {
 // Normalized returns the note input with title, tags, and linkage cleaned up.
 func (in NoteInput) Normalized() NoteInput {
 	in.Title = strings.TrimSpace(in.Title)
+	in.CategoryID = strings.TrimSpace(in.CategoryID)
 	in.Tags = NormalizeTags(in.Tags)
 	in.PromptID = strings.TrimSpace(in.PromptID)
+	return in
+}
+
+// Normalized returns the category input with its fields cleaned up.
+func (in CategoryInput) Normalized() CategoryInput {
+	in.Name = strings.TrimSpace(in.Name)
+	in.ParentID = strings.TrimSpace(in.ParentID)
 	return in
 }
 

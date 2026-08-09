@@ -3,17 +3,25 @@
 ## 1. Functional Requirements
 
 ### FR-001: Prompt Entity
-* A prompt is persisted with the fields: `id` (opaque, server-assigned), `name`, `tags` (list of strings), `body` (template text), `variables` (optional list of declared placeholder names), `version` (integer, starts at 1), `createdAt`, `updatedAt` (RFC 3339 UTC).
+* A prompt is persisted with the fields: `id` (opaque, server-assigned), `name`, `kind` (`system` or `user`), `categoryId` (optional linkage to a category), `systemPromptId` (optional linkage to a system prompt, `kind=user` only), `tags` (list of strings), `body` (template text), `variables` (optional list of declared placeholder names), `version` (integer, starts at 1), `createdAt`, `updatedAt` (RFC 3339 UTC).
 * `name` and `body` are required on create; a request missing either is rejected with a validation error naming the offending field.
+* `kind` must be `system` or `user`; when omitted it defaults to `user` for backward compatibility.
+* `systemPromptId` must be empty when `kind=system`; when set it must reference an existing prompt with `kind=system`. Deleting a system prompt that user prompts reference is rejected unless `?force=true` is supplied, which clears the references.
 * Tags are normalized: trimmed, lower-cased, de-duplicated, and stored in a stable sorted order.
 * `version` increments by exactly one whenever an update changes `body` or `variables`. Edits that only touch `name` or `tags` leave `version` unchanged.
 * `id`, `version`, `createdAt`, and `updatedAt` are server-owned; values supplied by a client for those fields are ignored.
 
 ### FR-002: Note Entity
-* A note is persisted with the fields: `id`, `title`, `tags`, `body` (Markdown), `promptId` (optional linkage to a prompt), `createdAt`, `updatedAt`.
+* A note is persisted with the fields: `id`, `title`, `categoryId` (optional linkage to a category), `tags`, `body` (Markdown), `promptId` (optional linkage to a prompt), `createdAt`, `updatedAt`.
+* `GET /v1/prompts/{id}/notes` lists the notes attached to a prompt, with the same payload shape as a filtered note listing.
 * `title` is required on create; `body` may be empty.
 * When `promptId` is present it must reference an existing prompt; otherwise the request is rejected as a validation error. Clearing the link is done by sending an empty `promptId`.
 * Tag normalization matches FR-001.
+
+### FR-002a: Category Entity
+* A category is persisted with the fields: `id`, `name` (required, non-empty, trimmed), `parentId` (optional, empty for a root category), `createdAt`, `updatedAt`.
+* Categories form a tree: `parentId` must reference an existing category and must not create a cycle (including self-reference).
+* Deleting a category with child categories or with prompts/notes assigned is rejected as a validation error unless `?force=true` is supplied, which re-parents the children to the deleted category's parent and clears `categoryId` on assigned items.
 
 ### FR-003: CRUD Semantics
 * Create, read, update (full replace of client-owned fields), and delete are supported for both entity types.
@@ -24,7 +32,8 @@
 * Listing returns records sorted by `updatedAt` descending, with `id` ascending as a deterministic tiebreaker.
 * `tag` may be repeated; a record matches only when it carries **every** requested tag (AND semantics). Matching is case-insensitive.
 * `q` performs case-insensitive substring matching. For prompts it searches `name`, `body`, and `variables`; for notes it searches `title` and `body`.
-* `tag` and `q` combine conjunctively. `limit` and `offset` paginate the filtered result; the response reports the pre-pagination `total`.
+* Prompt listings additionally accept `category` (exact `categoryId` match) and `kind` filters; note listings additionally accept `category` and `prompt` (exact `promptId` match) filters.
+* All filters combine conjunctively. `limit` and `offset` paginate the filtered result; the response reports the pre-pagination `total`.
 * A tag inventory endpoint returns every distinct tag in use with its usage count per entity type.
 
 ### FR-005: Authentication and Binding

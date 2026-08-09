@@ -54,6 +54,59 @@ func TestPromptInputValidation(t *testing.T) {
 	}
 }
 
+func TestPromptInputKindValidation(t *testing.T) {
+	cases := []struct {
+		name      string
+		in        PromptInput
+		wantField string
+	}{
+		{"system kind ok", PromptInput{Name: "n", Body: "b", Kind: KindSystem}, ""},
+		{"user kind ok", PromptInput{Name: "n", Body: "b", Kind: KindUser}, ""},
+		{"empty kind ok", PromptInput{Name: "n", Body: "b"}, ""},
+		{"unknown kind", PromptInput{Name: "n", Body: "b", Kind: "assistant"}, "kind"},
+		{"system with reference", PromptInput{Name: "n", Body: "b", Kind: KindSystem, SystemPromptID: "abc"}, "systemPromptId"},
+		{"user with reference ok", PromptInput{Name: "n", Body: "b", Kind: KindUser, SystemPromptID: "abc"}, ""},
+	}
+	for _, tc := range cases {
+		err := tc.in.Validate()
+		if tc.wantField == "" {
+			if err != nil {
+				t.Errorf("%s: unexpected error %v", tc.name, err)
+			}
+			continue
+		}
+		verr, ok := err.(*ValidationError)
+		if !ok || verr.Field != tc.wantField {
+			t.Errorf("%s: error = %v, want field %q", tc.name, err, tc.wantField)
+		}
+	}
+}
+
+func TestPromptInputNormalizedDefaultsKind(t *testing.T) {
+	in := PromptInput{Name: "n", Body: "b"}.Normalized()
+	if in.Kind != KindUser {
+		t.Errorf("kind = %q, want %q", in.Kind, KindUser)
+	}
+	in = PromptInput{Name: "n", Body: "b", Kind: " SYSTEM ", CategoryID: " c1 ", SystemPromptID: " s1 "}.Normalized()
+	if in.Kind != KindSystem || in.CategoryID != "c1" || in.SystemPromptID != "s1" {
+		t.Errorf("unexpected normalization: %+v", in)
+	}
+}
+
+func TestCategoryInputValidationAndNormalization(t *testing.T) {
+	in := CategoryInput{Name: "  Folder ", ParentID: " p1 "}.Normalized()
+	if in.Name != "Folder" || in.ParentID != "p1" {
+		t.Fatalf("unexpected normalization: %+v", in)
+	}
+	if err := in.Validate(); err != nil {
+		t.Fatalf("valid category rejected: %v", err)
+	}
+	verr, ok := (CategoryInput{Name: "  "}).Validate().(*ValidationError)
+	if !ok || verr.Field != "name" {
+		t.Fatalf("expected name validation error, got %v", verr)
+	}
+}
+
 func TestNoteInputNormalizationAndValidation(t *testing.T) {
 	in := NoteInput{Title: "  Title ", Tags: []string{"X"}, PromptID: "  abc "}.Normalized()
 	if in.Title != "Title" || in.PromptID != "abc" || !SameStrings(in.Tags, []string{"x"}) {

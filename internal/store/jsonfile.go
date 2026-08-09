@@ -16,14 +16,16 @@ import (
 )
 
 // snapshotVersion identifies the on-disk layout so a future migration can
-// recognize files written by this version.
-const snapshotVersion = 1
+// recognize files written by this version. Version 2 adds categories, prompt
+// kinds, and category assignments; version 1 files load with defaults.
+const snapshotVersion = 2
 
 // snapshot is the full on-disk representation of the store.
 type snapshot struct {
-	Version int            `json:"version"`
-	Prompts []model.Prompt `json:"prompts"`
-	Notes   []model.Note   `json:"notes"`
+	Version    int              `json:"version"`
+	Prompts    []model.Prompt   `json:"prompts"`
+	Notes      []model.Note     `json:"notes"`
+	Categories []model.Category `json:"categories"`
 }
 
 // JSONFileStore is a Repository backed by a single local JSON file. The whole
@@ -32,9 +34,10 @@ type JSONFileStore struct {
 	path string
 	now  func() time.Time
 
-	mu      sync.RWMutex
-	prompts map[string]model.Prompt
-	notes   map[string]model.Note
+	mu         sync.RWMutex
+	prompts    map[string]model.Prompt
+	notes      map[string]model.Note
+	categories map[string]model.Category
 }
 
 // compile-time assertion that the file store satisfies the contract.
@@ -53,10 +56,11 @@ func OpenJSONFile(path string) (*JSONFileStore, error) {
 		}
 	}
 	s := &JSONFileStore{
-		path:    path,
-		now:     func() time.Time { return time.Now().UTC() },
-		prompts: make(map[string]model.Prompt),
-		notes:   make(map[string]model.Note),
+		path:       path,
+		now:        func() time.Time { return time.Now().UTC() },
+		prompts:    make(map[string]model.Prompt),
+		notes:      make(map[string]model.Note),
+		categories: make(map[string]model.Category),
 	}
 	raw, err := os.ReadFile(path)
 	switch {
@@ -73,10 +77,16 @@ func OpenJSONFile(path string) (*JSONFileStore, error) {
 		return nil, fmt.Errorf("store: parse data file %s: %w", path, err)
 	}
 	for _, p := range snap.Prompts {
+		if p.Kind == "" {
+			p.Kind = model.KindUser
+		}
 		s.prompts[p.ID] = p
 	}
 	for _, n := range snap.Notes {
 		s.notes[n.ID] = n
+	}
+	for _, c := range snap.Categories {
+		s.categories[c.ID] = c
 	}
 	return s, nil
 }
@@ -97,16 +107,22 @@ func (s *JSONFileStore) CreatePrompt(_ context.Context, in model.PromptInput) (m
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if err := s.checkPromptReferencesLocked(in); err != nil {
+		return model.Prompt{}, err
+	}
 	ts := s.now()
 	prompt := model.Prompt{
-		ID:        id,
-		Name:      in.Name,
-		Tags:      in.Tags,
-		Body:      in.Body,
-		Variables: in.Variables,
-		Version:   1,
-		CreatedAt: ts,
-		UpdatedAt: ts,
+		ID:             id,
+		Name:           in.Name,
+		Kind:           in.Kind,
+		CategoryID:     in.CategoryID,
+		SystemPromptID: in.SystemPromptID,
+		Tags:           in.Tags,
+		Body:           in.Body,
+		Variables:      in.Variables,
+		Version:        1,
+		CreatedAt:      ts,
+		UpdatedAt:      ts,
 	}
 	s.prompts[id] = prompt
 	if err := s.persistLocked(); err != nil {
@@ -139,8 +155,24 @@ func (s *JSONFileStore) UpdatePrompt(_ context.Context, id string, in model.Prom
 	if !ok {
 		return model.Prompt{}, fmt.Errorf("prompt %q: %w", id, ErrNotFound)
 	}
+	if in.SystemPromptID == id {
+		return model.Prompt{}, &model.ValidationError{Field: "systemPromptId", Message: "must not reference the prompt itself"}
+	}
+	if err := s.checkPromptReferencesLocked(in); err != nil {
+		return model.Prompt{}, err
+	}
+	if existing.Kind == model.KindSystem && in.Kind == model.KindUser {
+		for _, p := range s.prompts {
+			if p.SystemPromptID == id {
+				return model.Prompt{}, &model.ValidationError{Field: "kind", Message: "cannot change kind to user while user prompts reference this system prompt"}
+			}
+		}
+	}
 	updated := existing
 	updated.Name = in.Name
+	updated.Kind = in.Kind
+	updated.CategoryID = in.CategoryID
+	updated.SystemPromptID = in.SystemPromptID
 	updated.Tags = in.Tags
 	updated.Body = in.Body
 	updated.Variables = in.Variables
@@ -156,13 +188,28 @@ func (s *JSONFileStore) UpdatePrompt(_ context.Context, id string, in model.Prom
 	return updated, nil
 }
 
-func (s *JSONFileStore) DeletePrompt(_ context.Context, id string) error {
+func (s *JSONFileStore) DeletePrompt(_ context.Context, id string, force bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	existing, ok := s.prompts[id]
 	if !ok {
 		return fmt.Errorf("prompt %q: %w", id, ErrNotFound)
+	}
+	referencing := make(map[string]model.Prompt)
+	for promptID, p := range s.prompts {
+		if p.SystemPromptID == id {
+			referencing[promptID] = p
+		}
+	}
+	if len(referencing) > 0 && !force {
+		return &model.ValidationError{Field: "id", Message: "system prompt is referenced by user prompts; retry with ?force=true to clear the references"}
+	}
+	for promptID, p := range referencing {
+		cleared := p
+		cleared.SystemPromptID = ""
+		cleared.UpdatedAt = s.now()
+		s.prompts[promptID] = cleared
 	}
 	// Notes keep their linkage semantics honest: a deleted prompt unlinks.
 	relinked := make(map[string]model.Note)
@@ -178,6 +225,9 @@ func (s *JSONFileStore) DeletePrompt(_ context.Context, id string) error {
 	delete(s.prompts, id)
 	if err := s.persistLocked(); err != nil {
 		s.prompts[id] = existing
+		for promptID, p := range referencing {
+			s.prompts[promptID] = p
+		}
 		for noteID, note := range relinked {
 			s.notes[noteID] = note
 		}
@@ -192,6 +242,12 @@ func (s *JSONFileStore) ListPrompts(_ context.Context, opts ListOptions) (Prompt
 
 	matched := make([]model.Prompt, 0, len(s.prompts))
 	for _, p := range s.prompts {
+		if opts.CategoryID != "" && p.CategoryID != opts.CategoryID {
+			continue
+		}
+		if opts.Kind != "" && p.Kind != opts.Kind {
+			continue
+		}
 		if !model.HasAllTags(p.Tags, opts.Tags) {
 			continue
 		}
@@ -227,15 +283,19 @@ func (s *JSONFileStore) CreateNote(_ context.Context, in model.NoteInput) (model
 	if err := s.checkPromptLinkLocked(in.PromptID); err != nil {
 		return model.Note{}, err
 	}
+	if err := s.checkCategoryLinkLocked(in.CategoryID); err != nil {
+		return model.Note{}, err
+	}
 	ts := s.now()
 	note := model.Note{
-		ID:        id,
-		Title:     in.Title,
-		Tags:      in.Tags,
-		Body:      in.Body,
-		PromptID:  in.PromptID,
-		CreatedAt: ts,
-		UpdatedAt: ts,
+		ID:         id,
+		Title:      in.Title,
+		CategoryID: in.CategoryID,
+		Tags:       in.Tags,
+		Body:       in.Body,
+		PromptID:   in.PromptID,
+		CreatedAt:  ts,
+		UpdatedAt:  ts,
 	}
 	s.notes[id] = note
 	if err := s.persistLocked(); err != nil {
@@ -271,8 +331,12 @@ func (s *JSONFileStore) UpdateNote(_ context.Context, id string, in model.NoteIn
 	if err := s.checkPromptLinkLocked(in.PromptID); err != nil {
 		return model.Note{}, err
 	}
+	if err := s.checkCategoryLinkLocked(in.CategoryID); err != nil {
+		return model.Note{}, err
+	}
 	updated := existing
 	updated.Title = in.Title
+	updated.CategoryID = in.CategoryID
 	updated.Tags = in.Tags
 	updated.Body = in.Body
 	updated.PromptID = in.PromptID
@@ -307,6 +371,12 @@ func (s *JSONFileStore) ListNotes(_ context.Context, opts ListOptions) (NotePage
 
 	matched := make([]model.Note, 0, len(s.notes))
 	for _, n := range s.notes {
+		if opts.CategoryID != "" && n.CategoryID != opts.CategoryID {
+			continue
+		}
+		if opts.PromptID != "" && n.PromptID != opts.PromptID {
+			continue
+		}
 		if !model.HasAllTags(n.Tags, opts.Tags) {
 			continue
 		}
@@ -344,6 +414,221 @@ func (s *JSONFileStore) Tags(_ context.Context) (TagInventory, error) {
 	return TagInventory{Prompts: sortedCounts(promptCounts), Notes: sortedCounts(noteCounts)}, nil
 }
 
+func (s *JSONFileStore) CreateCategory(_ context.Context, in model.CategoryInput) (model.Category, error) {
+	in = in.Normalized()
+	if err := in.Validate(); err != nil {
+		return model.Category{}, err
+	}
+	id, err := model.NewID()
+	if err != nil {
+		return model.Category{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.checkCategoryParentLocked(id, in.ParentID); err != nil {
+		return model.Category{}, err
+	}
+	ts := s.now()
+	category := model.Category{
+		ID:        id,
+		Name:      in.Name,
+		ParentID:  in.ParentID,
+		CreatedAt: ts,
+		UpdatedAt: ts,
+	}
+	s.categories[id] = category
+	if err := s.persistLocked(); err != nil {
+		delete(s.categories, id)
+		return model.Category{}, err
+	}
+	return category, nil
+}
+
+func (s *JSONFileStore) GetCategory(_ context.Context, id string) (model.Category, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	category, ok := s.categories[id]
+	if !ok {
+		return model.Category{}, fmt.Errorf("category %q: %w", id, ErrNotFound)
+	}
+	return category, nil
+}
+
+func (s *JSONFileStore) UpdateCategory(_ context.Context, id string, in model.CategoryInput) (model.Category, error) {
+	in = in.Normalized()
+	if err := in.Validate(); err != nil {
+		return model.Category{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	existing, ok := s.categories[id]
+	if !ok {
+		return model.Category{}, fmt.Errorf("category %q: %w", id, ErrNotFound)
+	}
+	if err := s.checkCategoryParentLocked(id, in.ParentID); err != nil {
+		return model.Category{}, err
+	}
+	updated := existing
+	updated.Name = in.Name
+	updated.ParentID = in.ParentID
+	updated.UpdatedAt = s.now()
+	s.categories[id] = updated
+	if err := s.persistLocked(); err != nil {
+		s.categories[id] = existing
+		return model.Category{}, err
+	}
+	return updated, nil
+}
+
+func (s *JSONFileStore) DeleteCategory(_ context.Context, id string, force bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	existing, ok := s.categories[id]
+	if !ok {
+		return fmt.Errorf("category %q: %w", id, ErrNotFound)
+	}
+
+	childCategories := make(map[string]model.Category)
+	for catID, c := range s.categories {
+		if c.ParentID == id {
+			childCategories[catID] = c
+		}
+	}
+	assignedPrompts := make(map[string]model.Prompt)
+	for promptID, p := range s.prompts {
+		if p.CategoryID == id {
+			assignedPrompts[promptID] = p
+		}
+	}
+	assignedNotes := make(map[string]model.Note)
+	for noteID, n := range s.notes {
+		if n.CategoryID == id {
+			assignedNotes[noteID] = n
+		}
+	}
+	if !force && (len(childCategories) > 0 || len(assignedPrompts) > 0 || len(assignedNotes) > 0) {
+		return &model.ValidationError{Field: "id", Message: "category has child categories or assigned items; retry with ?force=true to re-parent children and clear assignments"}
+	}
+
+	ts := s.now()
+	for catID, c := range childCategories {
+		reparented := c
+		reparented.ParentID = existing.ParentID
+		reparented.UpdatedAt = ts
+		s.categories[catID] = reparented
+	}
+	for promptID, p := range assignedPrompts {
+		cleared := p
+		cleared.CategoryID = ""
+		cleared.UpdatedAt = ts
+		s.prompts[promptID] = cleared
+	}
+	for noteID, n := range assignedNotes {
+		cleared := n
+		cleared.CategoryID = ""
+		cleared.UpdatedAt = ts
+		s.notes[noteID] = cleared
+	}
+	delete(s.categories, id)
+	if err := s.persistLocked(); err != nil {
+		s.categories[id] = existing
+		for catID, c := range childCategories {
+			s.categories[catID] = c
+		}
+		for promptID, p := range assignedPrompts {
+			s.prompts[promptID] = p
+		}
+		for noteID, n := range assignedNotes {
+			s.notes[noteID] = n
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *JSONFileStore) ListCategories(_ context.Context, opts ListOptions) (CategoryPage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	matched := make([]model.Category, 0, len(s.categories))
+	for _, c := range s.categories {
+		if !model.ContainsFold(opts.Query, c.Name) {
+			continue
+		}
+		matched = append(matched, c)
+	}
+	sort.Slice(matched, func(i, j int) bool {
+		if !matched[i].UpdatedAt.Equal(matched[j].UpdatedAt) {
+			return matched[i].UpdatedAt.After(matched[j].UpdatedAt)
+		}
+		return matched[i].ID < matched[j].ID
+	})
+	total := len(matched)
+	return CategoryPage{Items: paginate(matched, opts), Total: total}, nil
+}
+
+// checkPromptReferencesLocked validates a prompt input's categoryId and
+// systemPromptId against the current dataset. Callers must hold a lock.
+func (s *JSONFileStore) checkPromptReferencesLocked(in model.PromptInput) error {
+	if err := s.checkCategoryLinkLocked(in.CategoryID); err != nil {
+		return err
+	}
+	if in.SystemPromptID != "" {
+		target, ok := s.prompts[in.SystemPromptID]
+		if !ok {
+			return &model.ValidationError{Field: "systemPromptId", Message: fmt.Sprintf("no prompt exists with id %q", in.SystemPromptID)}
+		}
+		if target.Kind != model.KindSystem {
+			return &model.ValidationError{Field: "systemPromptId", Message: fmt.Sprintf("prompt %q is not a system prompt", in.SystemPromptID)}
+		}
+	}
+	return nil
+}
+
+// checkCategoryLinkLocked rejects a categoryId that points at a category that
+// is absent. Callers must hold a lock.
+func (s *JSONFileStore) checkCategoryLinkLocked(categoryID string) error {
+	if categoryID == "" {
+		return nil
+	}
+	if _, ok := s.categories[categoryID]; !ok {
+		return &model.ValidationError{Field: "categoryId", Message: fmt.Sprintf("no category exists with id %q", categoryID)}
+	}
+	return nil
+}
+
+// checkCategoryParentLocked rejects a parentId that is absent, self-referential,
+// or would introduce a cycle in the category tree. Callers must hold a lock.
+func (s *JSONFileStore) checkCategoryParentLocked(id, parentID string) error {
+	if parentID == "" {
+		return nil
+	}
+	if parentID == id {
+		return &model.ValidationError{Field: "parentId", Message: "must not reference the category itself"}
+	}
+	if _, ok := s.categories[parentID]; !ok {
+		return &model.ValidationError{Field: "parentId", Message: fmt.Sprintf("no category exists with id %q", parentID)}
+	}
+	seen := map[string]struct{}{id: {}}
+	for cursor := parentID; cursor != ""; {
+		if _, cycles := seen[cursor]; cycles {
+			return &model.ValidationError{Field: "parentId", Message: "must not create a cycle in the category tree"}
+		}
+		seen[cursor] = struct{}{}
+		parent, ok := s.categories[cursor]
+		if !ok {
+			break
+		}
+		cursor = parent.ParentID
+	}
+	return nil
+}
+
 // checkPromptLinkLocked rejects a note that points at a prompt that is absent.
 func (s *JSONFileStore) checkPromptLinkLocked(promptID string) error {
 	if promptID == "" {
@@ -359,9 +644,10 @@ func (s *JSONFileStore) checkPromptLinkLocked(promptID string) error {
 // it over the data file. Callers must hold the write lock.
 func (s *JSONFileStore) persistLocked() error {
 	snap := snapshot{
-		Version: snapshotVersion,
-		Prompts: make([]model.Prompt, 0, len(s.prompts)),
-		Notes:   make([]model.Note, 0, len(s.notes)),
+		Version:    snapshotVersion,
+		Prompts:    make([]model.Prompt, 0, len(s.prompts)),
+		Notes:      make([]model.Note, 0, len(s.notes)),
+		Categories: make([]model.Category, 0, len(s.categories)),
 	}
 	for _, p := range s.prompts {
 		snap.Prompts = append(snap.Prompts, p)
@@ -369,8 +655,12 @@ func (s *JSONFileStore) persistLocked() error {
 	for _, n := range s.notes {
 		snap.Notes = append(snap.Notes, n)
 	}
+	for _, c := range s.categories {
+		snap.Categories = append(snap.Categories, c)
+	}
 	sort.Slice(snap.Prompts, func(i, j int) bool { return snap.Prompts[i].ID < snap.Prompts[j].ID })
 	sort.Slice(snap.Notes, func(i, j int) bool { return snap.Notes[i].ID < snap.Notes[j].ID })
+	sort.Slice(snap.Categories, func(i, j int) bool { return snap.Categories[i].ID < snap.Categories[j].ID })
 
 	payload, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {

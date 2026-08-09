@@ -123,16 +123,22 @@ curl -s http://127.0.0.1:8765/v1/prompts \
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/healthz` | Liveness. Unauthenticated. |
-| `GET` | `/v1/prompts` | List/search prompts. |
+| `GET` | `/v1/prompts` | List/search prompts (`tag`, `q`, `category`, `kind`). |
 | `POST` | `/v1/prompts` | Create a prompt. |
 | `GET` | `/v1/prompts/{id}` | Fetch one prompt. |
 | `PUT` | `/v1/prompts/{id}` | Replace a prompt's client-owned fields. |
-| `DELETE` | `/v1/prompts/{id}` | Delete a prompt (linked notes are unlinked). |
-| `GET` | `/v1/notes` | List/search notes. |
+| `DELETE` | `/v1/prompts/{id}` | Delete a prompt (linked notes are unlinked). Supports `?force=true` for referenced system prompts. |
+| `GET` | `/v1/prompts/{id}/notes` | Notes attached to a prompt (same shape as a filtered note listing). |
+| `GET` | `/v1/notes` | List/search notes (`tag`, `q`, `category`, `prompt`). |
 | `POST` | `/v1/notes` | Create a note. |
 | `GET` | `/v1/notes/{id}` | Fetch one note. |
 | `PUT` | `/v1/notes/{id}` | Replace a note's client-owned fields. |
 | `DELETE` | `/v1/notes/{id}` | Delete a note. |
+| `GET` | `/v1/categories` | List/search categories. |
+| `POST` | `/v1/categories` | Create a category. |
+| `GET` | `/v1/categories/{id}` | Fetch one category. |
+| `PUT` | `/v1/categories/{id}` | Replace a category's client-owned fields. |
+| `DELETE` | `/v1/categories/{id}` | Delete a category. Supports `?force=true` when it has children or assigned items. |
 | `GET` | `/v1/tags` | Distinct tags in use, with counts, per entity type. |
 
 ## Entity shapes
@@ -143,6 +149,9 @@ curl -s http://127.0.0.1:8765/v1/prompts \
 {
   "id": "9f1c1c4d8f7b4a1e9d0b6a2c3e4f5a6b",
   "name": "Summarize transcript",
+  "kind": "user",
+  "categoryId": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d",
+  "systemPromptId": "0f9e8d7c6b5a49382716051423324150",
   "tags": ["meetings", "writing"],
   "body": "Summarize the following transcript:\n\n{{transcript}}",
   "variables": ["transcript"],
@@ -156,6 +165,9 @@ curl -s http://127.0.0.1:8765/v1/prompts \
 | --- | --- | --- |
 | `id` | string | Server-assigned, opaque. |
 | `name` | string | Required, non-blank. |
+| `kind` | string | `"system"` or `"user"`. Defaults to `"user"` when omitted. |
+| `categoryId` | string | Optional. Must reference an existing category. Omitted from the response when unset. |
+| `systemPromptId` | string | Optional, `kind=user` only. Must reference an existing `kind=system` prompt; must be empty for a system prompt. Omitted from the response when unset. |
 | `tags` | string[] | Trimmed, lower-cased, de-duplicated, sorted. Always present (`[]` when empty). |
 | `body` | string | Required, non-blank. The template text. |
 | `variables` | string[] | Optional declared placeholder names, de-duplicated, author order preserved. |
@@ -168,6 +180,7 @@ curl -s http://127.0.0.1:8765/v1/prompts \
 {
   "id": "c7a2b1e04d5f42a8b9c3d1e0f5a6b7c8",
   "title": "How the summarizer behaved on long calls",
+  "categoryId": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d",
   "tags": ["meetings"],
   "body": "# Findings\n\nTruncates past ~40 minutes.",
   "promptId": "9f1c1c4d8f7b4a1e9d0b6a2c3e4f5a6b",
@@ -180,9 +193,31 @@ curl -s http://127.0.0.1:8765/v1/prompts \
 | --- | --- | --- |
 | `id` | string | Server-assigned, opaque. |
 | `title` | string | Required, non-blank. |
+| `categoryId` | string | Optional. Must reference an existing category. Omitted from the response when unset. |
 | `tags` | string[] | Normalized as above. |
 | `body` | string | Markdown. May be empty. |
 | `promptId` | string | Optional. Must reference an existing prompt. Omitted from the response when unset. Send `""` to clear. |
+| `createdAt` / `updatedAt` | RFC 3339 UTC | Server-owned. |
+
+### Category
+
+Hierarchical folders that organize both prompts and notes.
+
+```json
+{
+  "id": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d",
+  "name": "Meetings",
+  "parentId": "9c0d1e2f3a4b5c6d1a2b3c4d5e6f7a8b",
+  "createdAt": "2026-01-04T09:12:44Z",
+  "updatedAt": "2026-01-04T09:12:44Z"
+}
+```
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | string | Server-assigned, opaque. |
+| `name` | string | Required, non-blank, trimmed. |
+| `parentId` | string | Optional. Must reference an existing category and must not create a cycle. Omitted from the response when unset (root). |
 | `createdAt` / `updatedAt` | RFC 3339 UTC | Server-owned. |
 
 `id`, `version`, `createdAt`, and `updatedAt` are server-owned: values a client
@@ -229,6 +264,16 @@ field — omitting `tags` clears them. It returns `200` with the updated entity.
 `DELETE` returns `204 No Content` with an empty body, or `404 not_found`.
 Deleting a prompt clears `promptId` on any note that referenced it.
 
+Two deletes are guarded and take an optional `?force=true` query parameter:
+
+* `DELETE /v1/prompts/{id}` on a system prompt that user prompts reference is
+  rejected with `validation_failed`; with `?force=true` the references are
+  cleared and the prompt is deleted.
+* `DELETE /v1/categories/{id}` on a category with child categories or with
+  prompts/notes assigned is rejected with `validation_failed`; with
+  `?force=true` children are re-parented to the deleted category's parent and
+  `categoryId` is cleared on assigned prompts and notes.
+
 ### List, tag filter, search
 
 `GET /v1/prompts` and `GET /v1/notes` accept:
@@ -237,8 +282,15 @@ Deleting a prompt clears `promptId` on any note that referenced it.
 | --- | --- | --- | --- |
 | `tag` | yes | — | Record must carry **every** listed tag (AND). Case-insensitive. |
 | `q` | no | — | Case-insensitive substring match. Prompts: `name`, `body`, `variables`. Notes: `title`, `body`. |
+| `category` | no | — | Record's `categoryId` must equal the given id. |
+| `kind` | no | — | Prompts only: `system` or `user`. |
+| `prompt` | no | — | Notes only: note's `promptId` must equal the given id. |
 | `limit` | no | `100` | Page size, `1`–`1000`. |
 | `offset` | no | `0` | Records to skip. |
+
+`GET /v1/categories` accepts `q` (matches `name`), `limit`, and `offset`.
+`GET /v1/prompts/{id}/notes` is shorthand for `GET /v1/notes?prompt={id}` and
+accepts the same note-listing parameters.
 
 `tag` and `q` combine conjunctively. Results are sorted by `updatedAt`
 descending, with `id` ascending as a deterministic tiebreaker.
@@ -300,7 +352,7 @@ Every error — for every endpoint — uses one envelope:
 
 | HTTP | `code` | Cause |
 | --- | --- | --- |
-| `400` | `validation_failed` | A field violates a domain rule (missing `name`/`title`/`body`, dangling `promptId`, bad `limit`/`offset`). |
+| `400` | `validation_failed` | A field violates a domain rule (missing `name`/`title`/`body`, dangling `promptId`/`categoryId`/`systemPromptId`, a category cycle, a guarded delete without `force`, bad `limit`/`offset`/`kind`/`force`). |
 | `400` | `invalid_request` | Malformed JSON, unknown field, or trailing content. |
 | `401` | `unauthorized` | Missing or wrong `x-cue-note-api-key`. |
 | `404` | `not_found` | Unknown id or unknown route. |
