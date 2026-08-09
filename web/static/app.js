@@ -1,5 +1,6 @@
 // cue-note IDE-style UI. Dependency-free vanilla JS.
-// Talks to same-origin /api/v1/... (the webui proxy injects the API key).
+// Talks to same-origin /api/... (the webui proxy maps /api/* to the API's
+// /v1/* routes and injects the API key).
 // Feature-detects the v2 API (categories, kind, systemPromptId, promptId);
 // degrades to a tag-grouped tree against the v1 API. `?mock=1` serves
 // in-memory sample data so the full v2 UX is demonstrable without a backend.
@@ -283,19 +284,19 @@
   }
 
   const api = {
-    listPrompts: () => request("GET", "/api/v1/prompts?limit=1000"),
-    listNotes: () => request("GET", "/api/v1/notes?limit=1000"),
-    listCategories: () => request("GET", "/api/v1/categories"),
-    listTags: () => request("GET", "/api/v1/tags"),
-    createPrompt: (p) => request("POST", "/api/v1/prompts", p),
-    updatePrompt: (id, p) => request("PUT", `/api/v1/prompts/${id}`, p),
-    deletePrompt: (id, force) => request("DELETE", `/api/v1/prompts/${id}${force ? "?force=true" : ""}`),
-    createNote: (n) => request("POST", "/api/v1/notes", n),
-    updateNote: (id, n) => request("PUT", `/api/v1/notes/${id}`, n),
-    deleteNote: (id) => request("DELETE", `/api/v1/notes/${id}`),
-    createCategory: (c) => request("POST", "/api/v1/categories", c),
-    updateCategory: (id, c) => request("PUT", `/api/v1/categories/${id}`, c),
-    deleteCategory: (id, force) => request("DELETE", `/api/v1/categories/${id}${force ? "?force=true" : ""}`),
+    listPrompts: () => request("GET", "/api/prompts?limit=1000"),
+    listNotes: () => request("GET", "/api/notes?limit=1000"),
+    listCategories: () => request("GET", "/api/categories"),
+    listTags: () => request("GET", "/api/tags"),
+    createPrompt: (p) => request("POST", "/api/prompts", p),
+    updatePrompt: (id, p) => request("PUT", `/api/prompts/${id}`, p),
+    deletePrompt: (id, force) => request("DELETE", `/api/prompts/${id}${force ? "?force=true" : ""}`),
+    createNote: (n) => request("POST", "/api/notes", n),
+    updateNote: (id, n) => request("PUT", `/api/notes/${id}`, n),
+    deleteNote: (id) => request("DELETE", `/api/notes/${id}`),
+    createCategory: (c) => request("POST", "/api/categories", c),
+    updateCategory: (id, c) => request("PUT", `/api/categories/${id}`, c),
+    deleteCategory: (id, force) => request("DELETE", `/api/categories/${id}${force ? "?force=true" : ""}`),
   };
 
   const v2 = () => state.apiMode === "v2" || state.apiMode === "mock";
